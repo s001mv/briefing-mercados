@@ -75,7 +75,7 @@ for nombre in activos.keys():
         datos_mercado += f"- {nombre}: dato no disponible\n"
 
 # ==========================================
-# 3. PROMPT COMPLETO (íntegro, 52k tokens)
+# 3. PROMPT COMPLETO (íntegro, literal del original)
 # ==========================================
 prompt_completo = f"""
 {datos_mercado}
@@ -231,11 +231,19 @@ Genera el HTML completo con los precios que te he proporcionado. Usa SOLO esos d
 
 print("\n🧠 Generando briefing con Gemini (prompt completo de 52k tokens)...")
 
-# 🔥 MODELO CORRECTO
-response = client.models.generate_content(
-    model="gemini-1.5-flash",
-    contents=prompt_completo
-)
+# 🔥 MODELO CORRECTO - CON PREFIJO
+try:
+    response = client.models.generate_content(
+        model="models/gemini-1.5-flash",
+        contents=prompt_completo
+    )
+except Exception as e:
+    print(f"⚠️ Error con models/gemini-1.5-flash: {e}")
+    print("🔄 Intentando con gemini-1.5-flash-001...")
+    response = client.models.generate_content(
+        model="gemini-1.5-flash-001",
+        contents=prompt_completo
+    )
 
 html_informe = response.text
 
