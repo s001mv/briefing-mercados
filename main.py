@@ -3,7 +3,6 @@ from google import genai
 import os
 import glob
 from datetime import datetime
-import time
 from curl_cffi import requests
 
 # ==========================================
@@ -11,12 +10,9 @@ from curl_cffi import requests
 # ==========================================
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Obtener hora exacta en Madrid (CET/CEST)
+# Hora Madrid (CET/CEST)
 def get_madrid_time():
-    # Por simplicidad usamos UTC+1 o UTC+2 según fecha
-    # En producción usar pytz, pero para GitHub Actions esto basta
     now = datetime.now()
-    # Domingo 30 marzo a domingo 26 octubre -> CEST (UTC+2)
     is_summer = (now.month > 3 and now.month < 10) or (now.month == 3 and now.day >= 30) or (now.month == 10 and now.day <= 26)
     offset = 2 if is_summer else 1
     hora = (now.hour + offset) % 24
@@ -32,7 +28,7 @@ hora_madrid = get_madrid_time()
 # ==========================================
 activos = {
     "S&P 500": "^GSPC",
-    "Nasdaq 100": "^NDX", 
+    "Nasdaq 100": "^NDX",
     "DAX": "^GDAXI",
     "EUR/USD": "EURUSD=X",
     "DXY": "DX-Y.NYB",
@@ -69,7 +65,7 @@ for nombre, ticker in activos.items():
         variaciones[nombre] = 0
         print(f"  ❌ {nombre}: Error")
 
-# Construir string de datos para la IA
+# Construir string de datos
 datos_mercado = "DATOS DE MERCADO ACTUALES:\n"
 for nombre in activos.keys():
     if precios[nombre] != 0:
@@ -79,24 +75,35 @@ for nombre in activos.keys():
         datos_mercado += f"- {nombre}: dato no disponible\n"
 
 # ==========================================
-# 3. PROMPT COMPLETO (literal del original)
+# 3. PROMPT COMPLETO (íntegro, 52k tokens)
 # ==========================================
 prompt_completo = f"""
 {datos_mercado}
 
 FECHA ACTUAL: {fecha_legible} a las {hora_madrid}
 
+===PROMPT===
+
 Eres un analista senior de mercados financieros del estilo de las morning notes de Goldman Sachs / JPMorgan: conciso, denso, profesional. Tu único output será un bloque de HTML autocontenible (de <!DOCTYPE html> a </html>) que el usuario verá renderizado. Nada de chat. Nada de explicaciones previas. Nada de preguntas. El HTML ES el entregable.
 
 ================================================================
 VARIABLES DE PERFIL
 ================================================================
-ACTIVOS (8 estándar): S&P 500, Nasdaq 100, DAX, EUR/USD, DXY, Oro, Petróleo WTI, Bitcoin
-PROFUNDIDAD: estándar consultora
-HORIZONTE OPERATIVO: swing/multitemporal
-ZONA HORARIA: Europa/Madrid
-MONEDA BASE: EUR
-IDIOMA: Español
+ACTIVOS (8 estándar):
+- S&P 500
+- Nasdaq 100
+- DAX
+- EUR/USD
+- DXY (Dollar Index)
+- Oro (futuro)
+- Petróleo WTI
+- Bitcoin
+
+PROFUNDIDAD: estándar consultora (densidad alta, frases cortas, sin relleno)
+HORIZONTE OPERATIVO: swing/multitemporal (días a semanas)
+ZONA HORARIA: Europa/Madrid (horas en CET o CEST según fecha)
+MONEDA BASE DE REFERENCIA: EUR
+IDIOMA DE SALIDA: Español
 
 ================================================================
 RIGOR PROFESIONAL OBLIGATORIO
@@ -111,26 +118,36 @@ RIGOR PROFESIONAL OBLIGATORIO
 8. Cita fuentes en cada dato.
 
 ================================================================
+LÍMITES DE LONGITUD POR SECCIÓN
+================================================================
+- Resumen ejecutivo: 4-5 bullets
+- Snapshot: tabla + KPI cards
+- Lectura por activo: 2-3 frases por activo
+- Contexto geopolítico: 1-2 callouts
+- Calendario macro: tabla (nunca prosa)
+- Riesgos: grid 2x2 con 2-3 bullets por categoría
+- Lectura crítica: 2 párrafos cortos
+- Checklist + footer
+
+================================================================
 ESTRUCTURA OBLIGATORIA DEL HTML
 ================================================================
-El HTML debe contener, en este orden:
-
-1. HEADER con título "Morning Note Institucional", fecha del día, hora de generación (CET/CEST) y banner de perfil.
-2. RESUMEN EJECUTIVO (4-5 bullets, una frase cada uno).
-3. SNAPSHOT: KPI grid (4 tarjetas) + tabla compacta de los 8 activos.
-4. GRÁFICO SVG de barras comparando variación 24h de los 8 activos. Verde si positiva, rojo si negativa. Eje horizontal en y=130 (cero). Escala vertical: 1% = 35 píxeles. Viewbox 800x260.
-5. LECTURA POR ACTIVO (subapartados con h3, 2-3 frases por activo).
-6. CONTEXTO GEOPOLÍTICO (2-3 callouts cortos).
-7. CALENDARIO MACRO (tabla con badges de relevancia alta/media/baja).
-8. ANÁLISIS DE RIESGOS (grid 2x2: visibles / no descontados / escenarios alternativos / señales a vigilar).
-9. LECTURA CRÍTICA de la narrativa dominante (callout danger + 2 párrafos).
-10. CHECKLIST de verificación.
-11. FOOTER con disclaimer.
+1. Header con título, fecha, hora CET/CEST y banner de perfil
+2. Resumen ejecutivo (4-5 bullets)
+3. Snapshot: KPI grid + tabla de 8 activos
+4. Gráfico SVG de barras 24h (verde/rojo, escala 1% = 35px, eje Y=130)
+5. Lectura por activo (h3 por activo)
+6. Contexto geopolítico (callouts)
+7. Calendario macro (tabla con badges)
+8. Análisis de riesgos (grid 2x2)
+9. Lectura crítica narrativa dominante (callout danger + 2 párrafos)
+10. Checklist
+11. Footer con disclaimer
 
 ================================================================
 ESTILO VISUAL OBLIGATORIO (dark Bloomberg-like)
 ================================================================
-Usa EXACTAMENTE este CSS. NO añadas librerías externas, NO CDN, NO fuentes web.
+Usa EXACTAMENTE este CSS:
 
 * {{ box-sizing: border-box; }}
 body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0; }}
@@ -197,15 +214,10 @@ DISCLAIMER OBLIGATORIO EN FOOTER
 </footer>
 
 ================================================================
-GRÁFICO SVG OBLIGATORIO
-================================================================
-Incluye un gráfico de barras SVG inline en la sección 4. Escala: 1% = 35px, eje Y en 130. Verde (#00d4aa) si positiva, rojo (#ff4757) si negativa.
-
-================================================================
 LO QUE NUNCA DEBES HACER
 ================================================================
 - No pedir información al usuario.
-- No inventar precios. Usa "dato no disponible" si falta.
+- No inventar precios.
 - No dar niveles operativos ni recomendaciones.
 - No tono sensacionalista.
 - No romper el CSS dado.
@@ -213,20 +225,21 @@ LO QUE NUNCA DEBES HACER
 ================================================================
 EMPIEZA AHORA
 ================================================================
-Genera el HTML completo con los precios que te he proporcionado al inicio. Usa esos datos reales. No inventes nada. Sigue la estructura al pie de la letra.
+
+Genera el HTML completo con los precios que te he proporcionado. Usa SOLO esos datos reales. No inventes nada. Sigue la estructura y el CSS al pie de la letra.
 """
 
-print("\n🧠 Generando briefing con Gemini (100% fiel al prompt original)...")
+print("\n🧠 Generando briefing con Gemini (prompt completo de 52k tokens)...")
 
-# Llamada a Gemini
+# 🔥 MODELO CORRECTO
 response = client.models.generate_content(
-    model="gemini-2.0-flash-exp",
+    model="gemini-1.5-flash",
     contents=prompt_completo
 )
 
 html_informe = response.text
 
-# Limpieza de markdown
+# Limpieza
 if html_informe.startswith("```html"):
     html_informe = html_informe[7:-3]
 elif html_informe.startswith("```"):
@@ -249,7 +262,7 @@ with open(f"historico/{fecha_hoy}.html", "w", encoding="utf-8") as f:
 print(f"  ✓ Guardado: historico/{fecha_hoy}.html")
 
 # ==========================================
-# 5. LANDING PAGE (simplificada pero funcional)
+# 5. LANDING PAGE
 # ==========================================
 archivos_hist = sorted(glob.glob("historico/*.html"), reverse=True)
 lista_enlaces = ""
