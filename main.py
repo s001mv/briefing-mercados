@@ -3,32 +3,42 @@ import google.generativeai as genai
 import os
 import glob
 from datetime import datetime
+import requests
 
-# 1. CONEXIÓN A GEMINI
+# 1. CONEXIÓN A GEMINI (Arreglado el nombre del modelo)
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel('gemini-1.5-pro')
+model = genai.GenerativeModel('gemini-1.5-pro-latest') # <-- Ahora sí lo encontrará
 
 fecha_hoy = datetime.now().strftime("%Y-%m-%d")
 fecha_legible = datetime.now().strftime("%d/%m/%Y")
 
-# 2. DESCARGA DE DATOS
+# 2. DESCARGA DE DATOS (Con trampa anti-bloqueo de Yahoo)
 activos = {
     "S&P 500": "^GSPC", "Nasdaq 100": "^NDX", "DAX": "^GDAXI",
     "EUR/USD": "EURUSD=X", "DXY": "DX-Y.NYB", "Oro (Futuro)": "GC=F",
     "Petroleo WTI": "CL=F", "Bitcoin": "BTC-USD"
 }
 
+# Creamos una sesión que simula ser Chrome de Windows
+session = requests.Session()
+session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"})
+
 datos_texto = f"DATOS DE MERCADO ACTUALES AL {fecha_legible}:\n"
 for nombre, ticker in activos.items():
     try:
-        data = yf.Ticker(ticker)
+        # Usamos la sesión trucada
+        data = yf.Ticker(ticker, session=session)
         hist = data.history(period="2d")
-        c_hoy = hist['Close'].iloc[-1]
-        c_ayer = hist['Close'].iloc[-2]
-        var_pct = ((c_hoy - c_ayer) / c_ayer) * 100
-        datos_texto += f"- {nombre}: {c_hoy:.2f} (Variación 24h: {var_pct:.2f}%)\n"
-    except:
-        datos_texto += f"- {nombre}: Datos no disponibles\n"
+        
+        if len(hist) >= 2:
+            c_hoy = hist['Close'].iloc[-1]
+            c_ayer = hist['Close'].iloc[-2]
+            var_pct = ((c_hoy - c_ayer) / c_ayer) * 100
+            datos_texto += f"- {nombre}: {c_hoy:.2f} (Variación 24h: {var_pct:.2f}%)\n"
+        else:
+            datos_texto += f"- {nombre}: Mercado cerrado / Sin datos\n"
+    except Exception as e:
+        datos_texto += f"- {nombre}: Datos no disponibles temporalmente\n"
 
 # 3. EL PROMPT E INSTRUCCIONES
 instrucciones_diseno = """
@@ -52,13 +62,12 @@ th { background: #21262d; color: #f0f6fc; }
 </style>
 """
 
-# Juntamos los datos variables con las instrucciones estáticas
 prompt_completo = datos_texto + "\n" + instrucciones_diseno
 
+# LLAMADA A LA IA
 response = model.generate_content(prompt_completo)
 html_informe = response.text
 
-# Limpiar markdown
 if html_informe.startswith("```html"):
     html_informe = html_informe[7:-3]
 elif html_informe.startswith("```"):
@@ -89,7 +98,7 @@ landing_page = f"""<!DOCTYPE html>
 a {{ color: #58a6ff; text-decoration: none; display: block; padding: 10px 0; border-bottom: 1px solid #30363d;}}</style>
 </head><body><h1>Mesa de Análisis Cuantitativo</h1>
 <a href="latest.html" class="btn">Leer Informe de Hoy ({fecha_legible})</a>
-<div class="caja"><h2>Hemeroteca</h2>{lista_enlaces}</div></body></html>"""
+<div class="caja"><h2>Hemeroteca</h2><ul>{lista_enlaces}</ul></div></body></html>"""
 
 with open("index.html", "w", encoding="utf-8") as f:
     f.write(landing_page.strip())
