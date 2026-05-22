@@ -1,0 +1,38 @@
+name: Generar Briefing Diario
+
+on:
+  schedule:
+    # Se ejecuta a las 05:00 UTC (07:00 hora de España) de Lunes a Viernes
+    - cron: '0 5 * * 1-5'
+  workflow_dispatch: # Nos permite ejecutarlo con un botón manualmente
+
+permissions:
+  contents: write
+
+jobs:
+  crear-informe:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Descargar el código
+      uses: actions/checkout@v3
+
+    - name: Preparar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Instalar herramientas
+      run: pip install -r requirements.txt
+
+    - name: Ejecutar el Cerebro (IA)
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # Saca la llave de la caja fuerte
+      run: python main.py
+
+    - name: Guardar archivos y publicar en la web
+      run: |
+        git config --global user.name "Bot Financiero"
+        git config --global user.email "bot@ejemplo.com"
+        git add .
+        git commit -m "Briefing publicado: $(date +'%Y-%m-%d')" || echo "Sin cambios"
+        git push
