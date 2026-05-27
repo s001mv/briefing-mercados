@@ -10,43 +10,7 @@ from curl_cffi import requests
 # ==========================================
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# ==========================================
-# 2. FUNCIÓN: OBTENER EL MEJOR MODELO
-# ==========================================
-def get_best_model():
-    print("🔍 Listando modelos disponibles...")
-    preferred_models = [
-        "gemini-3.1-flash-lite",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-1.5-pro",
-    ]
-    available_models = []
-    try:
-        for model in client.models.list():
-            if hasattr(model, 'supported_actions') and "generateContent" in model.supported_actions:
-                model_name = model.name.replace("models/", "")
-                available_models.append(model_name)
-                print(f"  📌 Disponible: {model_name}")
-    except Exception as e:
-        print(f"⚠️ Error listando modelos: {e}")
-    
-    for preferred in preferred_models:
-        if preferred in available_models:
-            print(f"✅ Seleccionado: {preferred}")
-            return preferred
-    
-    if available_models:
-        fallback = available_models[0]
-        print(f"⚠️ Usando fallback: {fallback}")
-        return fallback
-    
-    return "gemini-1.5-pro"
-
-# ==========================================
-# 3. HORA MADRID
-# ==========================================
+# Hora Madrid
 def get_madrid_time():
     now = datetime.now()
     is_summer = (now.month > 3 and now.month < 10) or (now.month == 3 and now.day >= 30) or (now.month == 10 and now.day <= 26)
@@ -59,10 +23,8 @@ fecha_hoy = datetime.now().strftime("%Y-%m-%d")
 fecha_legible = datetime.now().strftime("%d/%m/%Y")
 hora_madrid = get_madrid_time()
 
-print(f"📅 Fecha: {fecha_legible} | Hora Madrid: {hora_madrid}")
-
 # ==========================================
-# 4. DESCARGAR PRECIOS
+# 2. DESCARGAR PRECIOS
 # ==========================================
 activos = {
     "S&P 500": "^GSPC",
@@ -83,7 +45,7 @@ session.headers.update({
 precios = {}
 variaciones = {}
 
-print("📡 Descargando precios...")
+print("📡 Descargando precios en tiempo real...")
 for nombre, ticker in activos.items():
     try:
         ticker_obj = yf.Ticker(ticker, session=session)
@@ -108,53 +70,186 @@ for nombre in activos.keys():
     if precios[nombre] != 0:
         signo = "+" if variaciones[nombre] >= 0 else ""
         datos_mercado += f"- {nombre}: {precios[nombre]:.2f} (Var 24h: {signo}{variaciones[nombre]:.2f}%)\n"
+    else:
+        datos_mercado += f"- {nombre}: dato no disponible\n"
 
 # ==========================================
-# 5. PROMPT
+# 3. PROMPT ORIGINAL COMPLETO
 # ==========================================
 prompt_completo = f"""
 {datos_mercado}
 
 FECHA ACTUAL: {fecha_legible} a las {hora_madrid}
 
-Eres un analista senior de mercados financieros. Genera un briefing profesional en HTML.
+===PROMPT===
 
-ESTRUCTURA:
-1. Header con título, fecha, hora CET
+Eres un analista senior de mercados financieros del estilo de las morning notes de Goldman Sachs / JPMorgan: conciso, denso, profesional. Tu único output será un bloque de HTML autocontenible (de <!DOCTYPE html> a </html>) que el usuario verá renderizado. Nada de chat. Nada de explicaciones previas. Nada de preguntas. El HTML ES el entregable.
+
+================================================================
+VARIABLES DE PERFIL
+================================================================
+ACTIVOS (8 estándar):
+- S&P 500
+- Nasdaq 100
+- DAX
+- EUR/USD
+- DXY (Dollar Index)
+- Oro (futuro)
+- Petróleo WTI
+- Bitcoin
+
+PROFUNDIDAD: estándar consultora (densidad alta, frases cortas, sin relleno)
+HORIZONTE OPERATIVO: swing/multitemporal (días a semanas)
+ZONA HORARIA: Europa/Madrid (horas en CET o CEST según fecha)
+MONEDA BASE DE REFERENCIA: EUR
+IDIOMA DE SALIDA: Español
+
+================================================================
+RIGOR PROFESIONAL OBLIGATORIO
+================================================================
+1. Separa hechos de inferencias. Usa "Hecho:", "Lectura:", "Riesgo:".
+2. Verifica tesis dominantes contra el dato real.
+3. Nada de "máximos históricos" absolutos. Usa "zona de máximos cíclicos".
+4. Mentalidad probabilística: "es probable que...", "el escenario base sugiere..."
+5. Tono profesional, sobrio, sin sensacionalismo.
+6. Incluye análisis crítico de la narrativa dominante.
+7. SIN niveles operativos, SIN recomendaciones de compra/venta.
+8. Cita fuentes en cada dato.
+
+================================================================
+LÍMITES DE LONGITUD POR SECCIÓN
+================================================================
+- Resumen ejecutivo: 4-5 bullets
+- Snapshot: tabla + KPI cards
+- Lectura por activo: 2-3 frases por activo
+- Contexto geopolítico: 1-2 callouts
+- Calendario macro: tabla (nunca prosa)
+- Riesgos: grid 2x2 con 2-3 bullets por categoría
+- Lectura crítica: 2 párrafos cortos
+- Checklist + footer
+
+================================================================
+ESTRUCTURA OBLIGATORIA DEL HTML
+================================================================
+1. Header con título, fecha, hora CET/CEST y banner de perfil
 2. Resumen ejecutivo (4-5 bullets)
-3. Tabla de cotizaciones (8 activos)
-4. Lectura por activo (2-3 frases cada uno)
-5. Footer con disclaimer
+3. Snapshot: KPI grid + tabla de 8 activos
+4. Gráfico SVG de barras 24h (verde/rojo, escala 1% = 35px, eje Y=130)
+5. Lectura por activo (h3 por activo)
+6. Contexto geopolítico (callouts)
+7. Calendario macro (tabla con badges)
+8. Análisis de riesgos (grid 2x2)
+9. Lectura crítica narrativa dominante (callout danger + 2 párrafos)
+10. Checklist
+11. Footer con disclaimer
 
-ESTILO: dark mode, fondo #0d1117, texto #c9d1d9, acentos #58a6ff
+================================================================
+ESTILO VISUAL OBLIGATORIO (dark Bloomberg-like)
+================================================================
+Usa EXACTAMENTE este CSS:
 
-REGLAS:
-- NO inventes precios. Usa los datos reales.
-- NO recomendaciones de compra/venta.
-- Empieza DIRECTAMENTE con <!DOCTYPE html>
+* {{ box-sizing: border-box; }}
+body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif; font-size: 16px; line-height: 1.6; margin: 0; padding: 0; }}
+.wrap {{ max-width: 1180px; margin: 0 auto; padding: 28px 22px 64px; }}
+header {{ border-bottom: 2px solid #30363d; padding-bottom: 18px; margin-bottom: 28px; }}
+.tag {{ display: inline-block; background: #1f6feb; color: #fff; padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }}
+h1 {{ color: #f0f6fc; font-size: 30px; margin: 12px 0 4px; font-weight: 700; }}
+h2 {{ color: #f0f6fc; font-size: 22px; margin: 40px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #30363d; }}
+h3 {{ color: #58a6ff; font-size: 17px; margin: 18px 0 8px; }}
+p, li {{ font-size: 15.5px; }}
+.meta {{ color: #8b949e; font-size: 13px; margin-top: 6px; }}
+.section {{ margin-bottom: 22px; }}
+.kpi-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 14px 0 10px; }}
+.kpi {{ background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 14px; }}
+.kpi .name {{ font-size: 12px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }}
+.kpi .price {{ font-size: 20px; font-weight: 700; color: #f0f6fc; font-family: "SF Mono", Menlo, monospace; }}
+.kpi .delta {{ font-size: 13px; margin-top: 4px; font-family: "SF Mono", Menlo, monospace; }}
+table {{ width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 14px; background: #161b22; border: 1px solid #30363d; border-radius: 4px; overflow: hidden; }}
+th, td {{ padding: 9px 12px; text-align: left; border-bottom: 1px solid #21262d; }}
+th {{ background: #21262d; color: #f0f6fc; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }}
+td.num {{ text-align: right; font-variant-numeric: tabular-nums; font-family: "SF Mono", Menlo, monospace; }}
+td.asset {{ font-weight: 600; color: #f0f6fc; }}
+.up {{ color: #00d4aa; }}
+.down {{ color: #ff4757; }}
+.flat {{ color: #8b949e; }}
+.b-high {{ background: #ff4757; color: #fff; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }}
+.b-med {{ background: #f0883e; color: #fff; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }}
+.b-low {{ background: #30363d; color: #c9d1d9; padding: 2px 8px; border-radius: 3px; font-size: 11px; }}
+.badge-bull {{ background: #00d4aa20; color: #00d4aa; border: 1px solid #00d4aa55; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }}
+.badge-bear {{ background: #ff475720; color: #ff4757; border: 1px solid #ff475755; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }}
+.badge-range {{ background: #8b949e20; color: #c9d1d9; border: 1px solid #8b949e55; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }}
+.callout {{ background: #161b22; border-left: 4px solid #1f6feb; padding: 12px 16px; margin: 16px 0; border-radius: 0 4px 4px 0; font-size: 15px; }}
+.callout.warn {{ border-left-color: #f0883e; }}
+.callout.danger {{ border-left-color: #ff4757; }}
+.callout strong {{ color: #f0f6fc; }}
+.banner-perfil {{ background: #1f6feb15; border: 1px solid #1f6feb55; padding: 10px 14px; border-radius: 4px; font-size: 13px; color: #c9d1d9; margin-bottom: 18px; }}
+ul.check {{ list-style: none; padding-left: 0; margin: 8px 0; }}
+ul.check li {{ padding: 5px 0; border-bottom: 1px dashed #21262d; font-size: 14px; }}
+.risk-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }}
+.risk-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 14px 16px; }}
+.risk-card h4 {{ margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: #8b949e; font-weight: 600; }}
+.risk-card.visible h4 {{ color: #f0883e; }}
+.risk-card.hidden h4 {{ color: #ff4757; }}
+.risk-card.scenario h4 {{ color: #58a6ff; }}
+.risk-card.signal h4 {{ color: #00d4aa; }}
+.risk-card p {{ margin: 0 0 6px; font-size: 14px; line-height: 1.55; }}
+footer {{ margin-top: 40px; padding-top: 16px; border-top: 1px solid #30363d; color: #8b949e; font-size: 12px; }}
+footer p {{ font-size: 12px; margin: 6px 0; }}
+@media (max-width: 720px) {{ .risk-grid {{ grid-template-columns: 1fr; }} h1 {{ font-size: 24px; }} h2 {{ font-size: 19px; }} }}
+
+================================================================
+BANNER DE PERFIL OBLIGATORIO
+================================================================
+<div class="banner-perfil">
+  <strong>Perfil estándar usado.</strong> 8 activos: S&amp;P 500, Nasdaq 100, DAX, EUR/USD, DXY, Oro, Petróleo WTI, Bitcoin. Profundidad: estándar consultora. Horizonte: swing/multitemporal. Zona horaria: Europa/Madrid. Para personalizar, edita las variables del prompt antes de ejecutarlo.
+</div>
+
+================================================================
+DISCLAIMER OBLIGATORIO EN FOOTER
+================================================================
+<footer>
+  <p><strong>Aviso.</strong> Este briefing es información general de mercado, no asesoramiento financiero ni recomendación de inversión personalizada. No tiene en cuenta tu situación, objetivos ni tolerancia al riesgo. Las decisiones de inversión son tuyas y conllevan riesgo de pérdida. Para asesoramiento adaptado a tu perfil, acude a una entidad autorizada en tu país (CNMV en España, o equivalente).</p>
+  <p>Generado por IA con búsqueda web. Fuentes citadas en cada sección. Educación, no asesoramiento. Análisis probabilístico, no determinista.</p>
+</footer>
+
+================================================================
+LO QUE NUNCA DEBES HACER
+================================================================
+- No pedir información al usuario.
+- No inventar precios.
+- No dar niveles operativos ni recomendaciones.
+- No tono sensacionalista.
+- No romper el CSS dado.
+
+================================================================
+EMPIEZA AHORA
+================================================================
+
+Genera el HTML completo con los precios que te he proporcionado. Usa SOLO esos datos reales. No inventes nada. Sigue la estructura y el CSS al pie de la letra.
 """
 
-# ==========================================
-# 6. GENERAR BRIEFING
-# ==========================================
-print("\n🧠 Seleccionando modelo Gemini...")
-modelo_elegido = get_best_model()
+print("\n🧠 Generando briefing con Gemini (prompt completo)...")
 
-print(f"🚀 Generando briefing con {modelo_elegido}...")
-try:
-    response = client.models.generate_content(
-        model=modelo_elegido,
-        contents=prompt_completo
-    )
-    html_informe = response.text
-    print(f"📄 HTML recibido, longitud: {len(html_informe)} caracteres")
-except Exception as e:
-    print(f"❌ Error llamando a Gemini: {e}")
-    html_informe = None
+# Seleccionar modelo disponible
+modelos = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-lite"]
+html_informe = None
 
-# Verificar que el HTML no esté vacío
-if not html_informe or len(html_informe.strip()) < 100:
-    print("⚠️ HTML vacío o demasiado corto. Usando plantilla de respaldo...")
+for modelo in modelos:
+    try:
+        print(f"  Intentando con {modelo}...")
+        response = client.models.generate_content(
+            model=modelo,
+            contents=prompt_completo
+        )
+        html_informe = response.text
+        print(f"  ✅ Exitoso con {modelo}")
+        break
+    except Exception as e:
+        print(f"  ❌ {modelo} falló: {str(e)[:80]}")
+        continue
+
+if not html_informe:
+    print("❌ Todos los modelos fallaron. Usando plantilla de emergencia.")
     html_informe = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><title>Briefing {fecha_legible}</title>
@@ -162,11 +257,8 @@ if not html_informe or len(html_informe.strip()) < 100:
 </head>
 <body>
 <h1>Briefing de Mercados</h1>
-<p>Fecha: {fecha_legible} | Hora: {hora_madrid}</p>
-<h2>Datos obtenidos</h2>
+<p>No se pudo generar el informe. Fecha: {fecha_legible}</p>
 <pre>{datos_mercado}</pre>
-<hr>
-<p><strong>Aviso:</strong> Información general, no asesoramiento financiero.</p>
 </body>
 </html>"""
 
@@ -177,36 +269,25 @@ elif html_informe.startswith("```"):
     html_informe = html_informe[3:-3]
 html_informe = html_informe.strip()
 
-print(f"✅ Briefing final, longitud: {len(html_informe)} caracteres")
+print(f"✅ Briefing generado, longitud: {len(html_informe)} caracteres")
 
 # ==========================================
-# 7. GUARDAR ARCHIVOS
+# 4. GUARDAR ARCHIVOS
 # ==========================================
-print("\n💾 Guardando archivos...")
-
-# Crear carpeta historico si no existe
 os.makedirs("historico", exist_ok=True)
-print("  ✓ Carpeta 'historico' lista")
 
-# Guardar latest.html
 with open("latest.html", "w", encoding="utf-8") as f:
     f.write(html_informe)
 print("  ✓ Guardado: latest.html")
 
-# Guardar en historico
-historico_path = f"historico/{fecha_hoy}.html"
-with open(historico_path, "w", encoding="utf-8") as f:
+with open(f"historico/{fecha_hoy}.html", "w", encoding="utf-8") as f:
     f.write(html_informe)
-print(f"  ✓ Guardado: {historico_path}")
+print(f"  ✓ Guardado: historico/{fecha_hoy}.html")
 
 # ==========================================
-# 8. LANDING PAGE
+# 5. LANDING PAGE
 # ==========================================
-print("\n📄 Generando landing page...")
-
 archivos_hist = sorted(glob.glob("historico/*.html"), reverse=True)
-print(f"  📁 Encontrados {len(archivos_hist)} archivos en histórico")
-
 lista_enlaces = ""
 for ruta in archivos_hist[:30]:
     nombre = os.path.basename(ruta).replace(".html", "").replace("-", "/")
@@ -236,17 +317,8 @@ li a:hover{{color:#79c0ff;}}
 
 with open("index.html", "w", encoding="utf-8") as f:
     f.write(landing)
-print("  ✓ Guardado: index.html")
 
-# ==========================================
-# 9. RESUMEN FINAL
-# ==========================================
-print("\n" + "=" * 50)
-print("📊 RESUMEN DE ARCHIVOS GENERADOS:")
-print(f"  - latest.html: {os.path.getsize('latest.html')} bytes")
-print(f"  - {historico_path}: {os.path.getsize(historico_path)} bytes")
-print(f"  - index.html: {os.path.getsize('index.html')} bytes")
-print(f"  - Total en histórico: {len(archivos_hist)} archivos")
+print("✅ Landing page guardada: index.html")
 print("=" * 50)
-print("🎉 ¡PROCESO COMPLETADO CON ÉXITO!")
+print("🎉 ¡BRIEFING COMPLETO GENERADO CON ÉXITO!")
 print("=" * 50)
