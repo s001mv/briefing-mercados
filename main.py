@@ -4,16 +4,20 @@ import re
 import glob
 from datetime import datetime
 from curl_cffi import requests
-from openai import OpenAI
+import google.generativeai as genai
 
 # ==========================================
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN - GEMINI
 # ==========================================
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-if not DEEPSEEK_API_KEY:
-    print("❌ ERROR: No se encontró DEEPSEEK_API_KEY")
+if not GEMINI_API_KEY:
+    print("❌ ERROR: No se encontró GEMINI_API_KEY")
+    print("   Configúralo en GitHub Secrets: Settings → Secrets → GEMINI_API_KEY")
     exit(1)
+
+# Configurar Gemini
+genai.configure(api_key=GEMINI_API_KEY)
 
 def get_madrid_time():
     now = datetime.utcnow()
@@ -57,8 +61,8 @@ print("📡 Descargando precios...")
 for nombre, ticker in activos.items():
     try:
         t    = yf.Ticker(ticker, session=session)
-        hist = t.history(period="5d")       # 5d cubre festivos
-        hist = hist[hist["Close"].notna()]   # filtra NaN
+        hist = t.history(period="5d")
+        hist = hist[hist["Close"].notna()]
         if len(hist) >= 2:
             c_hoy   = float(hist["Close"].iloc[-1])
             c_ayer  = float(hist["Close"].iloc[-2])
@@ -84,7 +88,7 @@ for nombre in activos:
         )
 
 # ==========================================
-# 3. PROMPT
+# 3. PROMPT COMPLETO
 # ==========================================
 prompt = f"""{datos_mercado}
 FECHA: {fecha_legible}  |  HORA: {hora_madrid}
@@ -172,78 +176,77 @@ footer p{{font-size:12px;margin:6px 0;}}
 Genera el HTML COMPLETO ahora. Empieza directamente con <!DOCTYPE html> sin ningún texto previo."""
 
 print(f"\n📝 Prompt: {len(prompt):,} caracteres")
-print("🧠 Generando briefing con DeepSeek (deepseek-reasoner)...")
+print("🧠 Generando briefing con Gemini...")
 
 # ==========================================
-# 4. LLAMADA A DEEPSEEK
-#    FIX 1: timeout=300 (el reasoner tarda 3-5 min con prompts largos)
-#    FIX 2: se elimina el bloque <think>...</think> antes de procesar
-#    FIX 3: se lee reasoning_content si content viene vacío
+# 4. LLAMADA A GEMINI
 # ==========================================
 html_informe = None
 
-try:
-    client = OpenAI(
-        api_key=DEEPSEEK_API_KEY,
-        base_url="https://api.deepseek.com/v1",
-        timeout=300.0,          # FIX 1: era 120s, ahora 300s
-    )
+# Lista de modelos Gemini que podrían funcionar (orden de preferencia)
+modelos_gemini = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+]
 
-    response = client.chat.completions.create(
-        model="deepseek-reasoner",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=32768,
-    )
-
-    raw = response.choices[0].message.content or ""
-
-    # FIX 3: si content viene vacío, algunos builds del SDK meten
-    # el HTML en reasoning_content por error de parsing
-    if not raw.strip():
-        rc = getattr(response.choices[0].message, "reasoning_content", "") or ""
-        if rc.strip():
-            print("⚠️  content vacío, usando reasoning_content como fallback")
-            raw = rc
-
-    print(f"✅ Respuesta recibida: {len(raw):,} caracteres")
-
-    # FIX 2: elimina el bloque de razonamiento <think>...</think>
-    # El reasoner antepone su cadena de pensamiento antes del HTML
-    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-    print(f"   Tras eliminar <think>: {len(raw):,} caracteres")
-
-    # Limpia posibles bloques markdown
-    if "```html" in raw:
-        raw = raw.split("```html", 1)[1]
-        raw = raw.rsplit("```", 1)[0]
-    elif raw.strip().startswith("```"):
-        raw = raw.strip()[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-
-    raw = raw.strip()
-
-    # Busca el DOCTYPE aunque haya texto sobrante antes
-    if not raw.lower().startswith("<!doctype"):
-        idx = raw.lower().find("<!doctype")
-        if idx != -1:
-            print(f"⚠️  Texto basura antes del HTML ({idx} chars), recortando...")
-            raw = raw[idx:]
+for modelo in modelos_gemini:
+    try:
+        print(f"  Intentando con {modelo}...")
+        model = genai.GenerativeModel(modelo)
+        response = model.generate_content(prompt)
+        raw = response.text
+        
+        if raw and len(raw) > 100:
+            print(f"  ✅ Éxito con {modelo} ({len(raw):,} caracteres)")
+            
+            # Limpiar markdown si existe
+            if "```html" in raw:
+                raw = raw.split("```html", 1)[1]
+                raw = raw.rsplit("```", 1)[0]
+            elif raw.strip().startswith("```"):
+                raw = raw.strip()[3:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+            
+            raw = raw.strip()
+            
+            # Buscar DOCTYPE
+            if not raw.lower().startswith("<!doctype"):
+                idx = raw.lower().find("<!doctype")
+                if idx != -1:
+                    print(f"  ⚠️ Recortando texto basura ({idx} caracteres)")
+                    raw = raw[idx:]
+            
+            html_informe = raw
+            break
         else:
-            print("❌ No se encontró <!DOCTYPE> en la respuesta")
-            raw = None
+            print(f"  ❌ {modelo}: respuesta demasiado corta ({len(raw) if raw else 0} chars)")
+            
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+            print(f"  ❌ {modelo}: CUOTA EXCEDIDA")
+        elif "404" in error_msg:
+            print(f"  ❌ {modelo}: modelo no encontrado")
+        else:
+            print(f"  ❌ {modelo}: {error_msg[:100]}")
+        continue
 
-    html_informe = raw
-
-except Exception as e:
-    print(f"❌ Error con DeepSeek API: {e}")
+if not html_informe:
+    print("❌ Todos los modelos de Gemini fallaron")
+    print("   Posibles causas: cuota agotada, API key inválida, o modelos no disponibles")
+    print("   Verifica en: https://makersuite.google.com/app/apikey")
     html_informe = None
 
 # ==========================================
 # 5. FALLBACK DE EMERGENCIA
 # ==========================================
 if not html_informe or len(html_informe) < 1000:
-    print("⚠️  Usando HTML de emergencia (tabla básica)...")
+    print("⚠️ Usando HTML de emergencia (tabla básica)...")
 
     filas = ""
     for nombre in activos:
