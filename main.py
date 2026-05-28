@@ -72,7 +72,7 @@ for nombre in activos.keys():
         datos_mercado += f"- {nombre}: {precios[nombre]:.2f} (Var 24h: {signo}{variaciones[nombre]:.2f}%)\n"
 
 # ==========================================
-# 3. PROMPT ORIGINAL COMPLETO (52k+ caracteres)
+# 3. PROMPT ORIGINAL COMPLETO
 # ==========================================
 prompt_completo = f"""
 {datos_mercado}
@@ -232,10 +232,10 @@ Genera el HTML completo con los precios que te he proporcionado. Usa SOLO esos d
 """
 
 print(f"\n📝 Longitud del prompt: {len(prompt_completo)} caracteres")
-print("🧠 Generando briefing con DeepSeek...")
+print("🧠 Generando briefing con DeepSeek Reasoner...")
 
 # ==========================================
-# 4. LLAMADA A DEEPSEEK
+# 4. LLAMADA A DEEPSEEK (CON MODELO CORRECTO)
 # ==========================================
 try:
     client = OpenAI(
@@ -245,10 +245,10 @@ try:
     )
     
     response = client.chat.completions.create(
-        model="deepseek-chat",
+        model="deepseek-reasoner",  # Modelo con mayor capacidad
         messages=[{"role": "user", "content": prompt_completo}],
         temperature=0.2,
-        max_tokens=16384  # Suficiente para el HTML completo
+        max_tokens=32768  # Suficiente para el HTML completo
     )
     
     html_informe = response.choices[0].message.content
@@ -266,17 +266,24 @@ except Exception as e:
     html_informe = None
 
 # ==========================================
-# 5. EMERGENCIA (si falla)
+# 5. EMERGENCIA
 # ==========================================
-if not html_informe or len(html_informe) < 500:
+if not html_informe or len(html_informe) < 1000:
     print("⚠️ Generando HTML de emergencia...")
     
     tabla = ""
+    kpi_cards = ""
     for nombre in activos.keys():
         if precios[nombre] != 0:
             signo = "+" if variaciones[nombre] >= 0 else ""
             color = "up" if variaciones[nombre] >= 0 else "down"
             tabla += f"<tr><td class='asset'>{nombre}</td><td class='num'>{precios[nombre]:.2f}</td><td class='num {color}'>{signo}{variaciones[nombre]:.2f}%</td></tr>"
+            kpi_cards += f"""
+            <div class="kpi">
+                <div class="name">{nombre}</div>
+                <div class="price">{precios[nombre]:.2f}</div>
+                <div class="delta {color}">{signo}{variaciones[nombre]:.2f}%</div>
+            </div>"""
     
     html_informe = f"""<!DOCTYPE html>
 <html lang="es">
@@ -284,6 +291,12 @@ if not html_informe or len(html_informe) < 500:
 <style>
 *{{box-sizing:border-box;}}body{{background:#0d1117;color:#c9d1d9;font-family:-apple-system,sans-serif;margin:0;padding:40px;}}
 .wrap{{max-width:1180px;margin:0 auto;}}h1{{color:#f0f6fc;border-bottom:2px solid #30363d;padding-bottom:18px;}}
+h2{{color:#f0f6fc;margin:40px 0 12px;padding-bottom:8px;border-bottom:1px solid #30363d;}}
+.kpi-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0;}}
+.kpi{{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:12px;}}
+.kpi .name{{font-size:12px;color:#8b949e;text-transform:uppercase;margin-bottom:6px;}}
+.kpi .price{{font-size:20px;font-weight:700;color:#f0f6fc;}}
+.kpi .delta{{font-size:13px;margin-top:4px;}}
 .banner-perfil{{background:#1f6feb15;border:1px solid #1f6feb55;padding:10px 14px;border-radius:4px;margin-bottom:20px;}}
 table{{width:100%;border-collapse:collapse;background:#161b22;border:1px solid #30363d;border-radius:4px;}}
 th,td{{padding:12px;text-align:left;border-bottom:1px solid #21262d;}}
@@ -297,12 +310,19 @@ footer{{margin-top:40px;padding-top:16px;border-top:1px solid #30363d;color:#8b9
 <h1>📊 Morning Note Institucional</h1>
 <div class="banner-perfil"><strong>Perfil estándar usado.</strong> 8 activos: S&amp;P 500, Nasdaq 100, DAX, EUR/USD, DXY, Oro, Petróleo WTI, Bitcoin.</div>
 <p><strong>Fecha:</strong> {fecha_legible} | <strong>Hora:</strong> {hora_madrid}</p>
-<h2>📈 Cotizaciones</h2>
+
+<h2>📈 KPIs</h2>
+<div class="kpi-grid">{kpi_cards}</div>
+
+<h2>📋 Cotizaciones</h2>
 <table><thead><tr><th>Activo</th><th>Precio</th><th>Variación 24h</th></tr></thead><tbody>{tabla}</tbody></table>
+
 <footer><p><strong>Aviso.</strong> Información general de mercado, no asesoramiento financiero.</p></footer>
 </div>
 </body>
 </html>"""
+
+print(f"✅ Briefing final, longitud: {len(html_informe)} caracteres")
 
 # ==========================================
 # 6. GUARDAR ARCHIVOS
